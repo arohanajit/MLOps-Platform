@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: materialization-job
+  namespace: storage
+  labels:
+    app: materialization-job
+    component: data-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: materialization-job
+  template:
+    metadata:
+      labels:
+        app: materialization-job
+    spec:
+      containers:
+      - name: materialization
+        image: ${ECR_REPO}/mlops/materialization-job:latest
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        env:
+        - name: POSTGRES_HOST
+          value: "mlops-postgres-dev.database_endpoint_here"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "mlops"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: REDIS_HOST
+          value: "mlops-redis-cache-dev.redis_endpoint_here"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: password
+        - name: SYNC_INTERVAL_SECONDS
+          value: "60"
+        - name: BATCH_SIZE
+          value: "1000"
+        - name: TTL_SECONDS
+          value: "86400"
+        livenessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - "python materialization.py"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - pgrep
+            - -f
+            - "python materialization.py"
+          initialDelaySeconds: 5
+          periodSeconds: 10 

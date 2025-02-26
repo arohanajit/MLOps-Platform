@@ -1,0 +1,6 @@
+kafka-python==2.0.2
+confluent-kafka==2.3.0
+fastavro==1.9.1
+python-schema-registry-client==2.5.0
+python-json-logger==2.0.7
+structlog==24.1.0 

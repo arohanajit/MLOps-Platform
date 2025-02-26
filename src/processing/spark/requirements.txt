@@ -1,0 +1,12 @@
+pyspark==3.4.1
+delta-spark==2.4.0
+kafka-python==2.0.2
+confluent-kafka==2.3.0
+pyarrow==14.0.1
+pandas==2.0.3
+fastavro==1.9.1
+python-schema-registry-client==2.5.0
+great-expectations==0.17.16
+redis==5.0.1
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23 

@@ -1,0 +1,106 @@
+# Strimzi Kafka Operator configuration
+# Note: This is a simplified version. For production, please refer to official documentation.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: strimzi-cluster-operator
+  namespace: kafka
+  labels:
+    app: strimzi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: strimzi-cluster-operator
+  template:
+    metadata:
+      labels:
+        name: strimzi-cluster-operator
+    spec:
+      serviceAccountName: strimzi-cluster-operator
+      containers:
+      - name: strimzi-cluster-operator
+        image: quay.io/strimzi/operator:0.35.0
+        args:
+        - /opt/strimzi/bin/cluster_operator_run.sh
+        env:
+        - name: STRIMZI_NAMESPACE
+          value: "*"
+        - name: STRIMZI_FULL_RECONCILIATION_INTERVAL_MS
+          value: "120000"
+        - name: STRIMZI_OPERATION_TIMEOUT_MS
+          value: "300000"
+        - name: STRIMZI_DEFAULT_KAFKA_EXPORTER_IMAGE
+          value: quay.io/strimzi/kafka:0.35.0-kafka-3.4.0
+        - name: STRIMZI_DEFAULT_TOPIC_OPERATOR_IMAGE
+          value: quay.io/strimzi/operator:0.35.0
+        - name: STRIMZI_DEFAULT_USER_OPERATOR_IMAGE
+          value: quay.io/strimzi/operator:0.35.0
+        - name: STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE
+          value: quay.io/strimzi/kafka:0.35.0-kafka-3.4.0
+        - name: STRIMZI_LOG_LEVEL
+          value: INFO
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 384Mi
+          requests:
+            cpu: 200m
+            memory: 384Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: strimzi-cluster-operator
+  namespace: kafka
+  labels:
+    app: strimzi
+---
+# Cluster-wide role binding for the operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: strimzi-cluster-operator
+  labels:
+    app: strimzi
+subjects:
+- kind: ServiceAccount
+  name: strimzi-cluster-operator
+  namespace: kafka
+roleRef:
+  kind: ClusterRole
+  name: strimzi-cluster-operator-global
+  apiGroup: rbac.authorization.k8s.io
+---
+# Cluster-wide role for the operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: strimzi-cluster-operator-global
+  labels:
+    app: strimzi
+rules:
+- apiGroups: ["kafka.strimzi.io"]
+  resources: ["kafkas", "kafkas/status", "kafkaconnects", "kafkaconnects/status", "kafkatopics", "kafkausers", "kafkabridges", "kafkabridges/status"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "deployments/scale", "deployments/status", "statefulsets", "statefulsets/scale", "statefulsets/status"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["serviceaccounts", "services", "configmaps", "pods", "secrets", "endpoints", "events", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"] 

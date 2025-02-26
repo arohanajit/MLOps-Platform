@@ -1,0 +1,150 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: raycluster
+  namespace: model-training
+spec:
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      num-cpus: "2"
+    template:
+      spec:
+        containers:
+        - name: ray-head
+          image: rayproject/ray:2.6.3-py310
+          ports:
+          - containerPort: 6379
+            name: gcs
+          - containerPort: 8265
+            name: dashboard
+          - containerPort: 10001
+            name: client
+          resources:
+            limits:
+              cpu: 2
+              memory: 4Gi
+            requests:
+              cpu: 1
+              memory: 2Gi
+          env:
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow.mlflow.svc.cluster.local:5000"
+          volumeMounts:
+          - name: ray-shared
+            mountPath: /shared
+        volumes:
+        - name: ray-shared
+          persistentVolumeClaim:
+            claimName: ray-shared-pvc
+  workerGroupSpecs:
+    - replicas: 2
+      minReplicas: 1
+      maxReplicas: 10
+      groupName: small-workers
+      rayStartParams:
+        num-cpus: "4"
+      template:
+        spec:
+          containers:
+          - name: ray-worker
+            image: rayproject/ray:2.6.3-py310
+            resources:
+              limits:
+                cpu: 4
+                memory: 8Gi
+              requests:
+                cpu: 2
+                memory: 4Gi
+            env:
+            - name: MLFLOW_TRACKING_URI
+              value: "http://mlflow.mlflow.svc.cluster.local:5000"
+            volumeMounts:
+            - name: ray-shared
+              mountPath: /shared
+          volumes:
+          - name: ray-shared
+            persistentVolumeClaim:
+              claimName: ray-shared-pvc
+    - replicas: 1
+      minReplicas: 0
+      maxReplicas: 5
+      groupName: gpu-workers
+      rayStartParams:
+        num-cpus: "8"
+        num-gpus: "1"
+      template:
+        spec:
+          containers:
+          - name: ray-worker
+            image: rayproject/ray:2.6.3-gpu-py310
+            resources:
+              limits:
+                cpu: 8
+                memory: 16Gi
+                nvidia.com/gpu: 1
+              requests:
+                cpu: 4
+                memory: 8Gi
+                nvidia.com/gpu: 1
+            env:
+            - name: MLFLOW_TRACKING_URI
+              value: "http://mlflow.mlflow.svc.cluster.local:5000"
+            volumeMounts:
+            - name: ray-shared
+              mountPath: /shared
+          volumes:
+          - name: ray-shared
+            persistentVolumeClaim:
+              claimName: ray-shared-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-head
+  namespace: model-training
+spec:
+  selector:
+    ray.io/node-type: head
+    ray.io/cluster: raycluster
+  ports:
+  - port: 10001
+    name: client
+    targetPort: 10001
+  - port: 8265
+    name: dashboard
+    targetPort: 8265
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ray-shared-pvc
+  namespace: model-training
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ray-dashboard-ingress
+  namespace: model-training
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+  - host: ray.mlops.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ray-head
+            port:
+              number: 8265 

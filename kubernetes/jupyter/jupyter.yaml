@@ -1,0 +1,150 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyter
+  namespace: model-training
+  labels:
+    app: jupyter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jupyter
+  template:
+    metadata:
+      labels:
+        app: jupyter
+    spec:
+      containers:
+      - name: jupyter
+        image: jupyter/datascience-notebook:lab-4.0.5
+        args:
+          - start-notebook.sh
+          - --NotebookApp.token=''
+          - --NotebookApp.password=''
+          - --NotebookApp.allow_origin='*'
+        ports:
+        - containerPort: 8888
+        env:
+        - name: JUPYTER_ENABLE_LAB
+          value: "yes"
+        - name: GIT_USER_NAME
+          valueFrom:
+            secretKeyRef:
+              name: jupyter-git-credentials
+              key: git_user_name
+              optional: true
+        - name: GIT_USER_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: jupyter-git-credentials
+              key: git_user_email
+              optional: true
+        - name: MLFLOW_TRACKING_URI
+          value: "http://mlflow.mlflow.svc.cluster.local:5000"
+        resources:
+          limits:
+            cpu: 2
+            memory: 8Gi
+          requests:
+            cpu: 500m
+            memory: 2Gi
+        volumeMounts:
+        - name: jupyter-data
+          mountPath: /home/jovyan/work
+        - name: git-credentials
+          mountPath: /home/jovyan/.git-credentials
+          subPath: git-credentials
+          readOnly: true
+        - name: gitconfig
+          mountPath: /home/jovyan/.gitconfig
+          subPath: gitconfig
+          readOnly: true
+      volumes:
+      - name: jupyter-data
+        persistentVolumeClaim:
+          claimName: jupyter-pvc
+      - name: git-credentials
+        secret:
+          secretName: jupyter-git-credentials
+          optional: true
+          items:
+          - key: git_credentials
+            path: git-credentials
+      - name: gitconfig
+        configMap:
+          name: jupyter-gitconfig
+          optional: true
+          items:
+          - key: gitconfig
+            path: gitconfig
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyter
+  namespace: model-training
+spec:
+  selector:
+    app: jupyter
+  ports:
+  - port: 8888
+    targetPort: 8888
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyter-pvc
+  namespace: model-training
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jupyter-git-credentials
+  namespace: model-training
+type: Opaque
+data:
+  git_user_name: ZGF0YXNjaWVudGlzdA==  # datascientist
+  git_user_email: ZGF0YXNjaWVudGlzdEBtbG9wcy5leGFtcGxlLmNvbQ==  # datascientist@mlops.example.com
+  git_credentials: aHR0cHM6Ly91c2VybmFtZTpwYXNzd29yZEBnaXRodWIuY29t  # https://username:password@github.com
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jupyter-gitconfig
+  namespace: model-training
+data:
+  gitconfig: |
+    [credential]
+        helper = store
+    [user]
+        name = ${GIT_USER_NAME}
+        email = ${GIT_USER_EMAIL}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jupyter-ingress
+  namespace: model-training
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+  - host: jupyter.mlops.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: jupyter
+            port:
+              number: 8888 

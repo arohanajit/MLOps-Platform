@@ -1,0 +1,55 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: postgres-connector
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    tasks.max: 1
+    connector.class: io.debezium.connector.postgresql.PostgresConnector
+    
+    # Connection information
+    database.hostname: mlops-postgres-dev.database_endpoint_here
+    database.port: 5432
+    database.user: postgres
+    database.password: ${file:/opt/kafka/external-configuration/connector-config/postgres-credentials.properties:password}
+    database.dbname: mlops
+    database.server.name: postgres-server
+    
+    # Slot name for replication
+    slot.name: debezium_slot
+    
+    # Tables to capture changes from
+    table.include.list: public.users,public.orders,public.products
+    
+    # PostgreSQL specific configurations
+    plugin.name: pgoutput
+    publication.name: dbz_publication
+    
+    # Kafka topic naming schema
+    topic.prefix: postgres-cdc
+    
+    # Default behavior on schema changes
+    tombstones.on.delete: true
+    
+    # Configurations for the outbox pattern if implemented
+    transforms: unwrap
+    transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState
+    transforms.unwrap.drop.tombstones: false
+    
+    # Schema handling
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: true
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: true
+    
+    # Various performance and resource tuning options
+    max.batch.size: 2048
+    max.queue.size: 8192
+    poll.interval.ms: 1000
+    heartbeat.interval.ms: 5000
+    snapshot.mode: initial 

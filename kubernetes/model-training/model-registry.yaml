@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-registry
+  namespace: model-training
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-registry
+  template:
+    metadata:
+      labels:
+        app: model-registry
+    spec:
+      containers:
+      - name: model-registry
+        image: python:3.10-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          pip install mlflow==2.8.0 boto3==1.26.146 psycopg2-binary==2.9.6 python-dotenv==1.0.0
+          mlflow server \
+            --backend-store-uri=postgresql://$(DB_USER):$(DB_PASSWORD)@postgres.storage.svc.cluster.local:5432/model_registry \
+            --artifacts-destination=s3://$(S3_BUCKET)/model-artifacts \
+            --host=0.0.0.0 \
+            --port=8080 \
+            --serve-artifacts
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: model-registry-secrets
+              key: db_user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: model-registry-secrets
+              key: db_password
+        - name: S3_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: model-registry-config
+              key: s3_bucket
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: model-registry-secrets
+              key: aws_access_key_id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: model-registry-secrets
+              key: aws_secret_access_key
+        resources:
+          limits:
+            cpu: 1
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-registry
+  namespace: model-training
+spec:
+  selector:
+    app: model-registry
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: model-registry-secrets
+  namespace: model-training
+type: Opaque
+data:
+  db_user: cG9zdGdyZXM=  # postgres
+  db_password: cGFzc3dvcmQ=  # password
+  aws_access_key_id: QUtJQVhYWFhYWFhYWFhYWFg=  # Replace with actual encoded key
+  aws_secret_access_key: c2VjcmV0WFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWA==  # Replace with actual encoded key
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-registry-config
+  namespace: model-training
+data:
+  s3_bucket: mlops-platform-models
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: model-registry-ingress
+  namespace: model-training
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+  - host: models.mlops.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: model-registry
+            port:
+              number: 8080 

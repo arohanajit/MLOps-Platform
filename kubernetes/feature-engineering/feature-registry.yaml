@@ -1,0 +1,130 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: feature-engineering
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: feature-registry-config
+  namespace: feature-engineering
+data:
+  POSTGRES_HOST: "postgresql.storage.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "mlops"
+  LOG_LEVEL: "INFO"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feature-registry
+  namespace: feature-engineering
+  labels:
+    app: feature-registry
+    component: metadata
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: feature-registry
+  template:
+    metadata:
+      labels:
+        app: feature-registry
+    spec:
+      containers:
+      - name: feature-registry
+        image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/mlops-platform/feature-registry:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: feature-registry-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: feature-registry-config
+              key: POSTGRES_PORT
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: feature-registry-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: feature-registry-config
+              key: LOG_LEVEL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feature-registry
+  namespace: feature-engineering
+  labels:
+    app: feature-registry
+spec:
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: feature-registry
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: feature-registry-ingress
+  namespace: feature-engineering
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /api/feature-registry(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: feature-registry
+            port:
+              number: 80 

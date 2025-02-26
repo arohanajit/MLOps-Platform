@@ -1,0 +1,88 @@
+apiVersion: "sparkoperator.k8s.io/v1beta2"
+kind: SparkApplication
+metadata:
+  name: customer-events-processor
+  namespace: spark
+spec:
+  type: Python
+  mode: cluster
+  image: "$(ECR_REPO)/mlops/spark-driver:latest"
+  imagePullPolicy: Always
+  mainApplicationFile: local:///opt/spark/work-dir/customer_events_processor.py
+  sparkVersion: "3.4.1"
+  restartPolicy:
+    type: OnFailure
+    onFailureRetries: 3
+    onFailureRetryInterval: 10
+    onSubmissionFailureRetries: 5
+    onSubmissionFailureRetryInterval: 20
+  pythonVersion: "3"
+  deps:
+    jars:
+      - local:///opt/spark/jars/org.apache.spark_spark-sql-kafka-0-10_2.12-3.4.1.jar
+      - local:///opt/spark/jars/org.apache.kafka_kafka-clients-3.3.2.jar
+      - local:///opt/spark/jars/io.delta_delta-core_2.12-2.4.0.jar
+      - local:///opt/spark/jars/org.postgresql_postgresql-42.6.0.jar
+    packages:
+      - org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1
+      - io.delta:delta-core_2.12:2.4.0
+      - org.postgresql:postgresql:42.6.0
+    excludePackages:
+      - net.sourceforge.f2j:arpack_combined_all
+  driver:
+    cores: 1
+    coreLimit: "1200m"
+    memory: "2048m"
+    serviceAccount: spark
+    labels:
+      version: 3.4.1
+    env:
+      - name: KAFKA_BOOTSTRAP_SERVERS
+        value: kafka-bootstrap.kafka.svc.cluster.local:9092
+      - name: SCHEMA_REGISTRY_URL
+        value: http://schema-registry.kafka.svc.cluster.local:8081
+      - name: CHECKPOINT_LOCATION
+        value: /tmp/spark-checkpoints
+      - name: POSTGRES_JDBC_URL
+        value: jdbc:postgresql://mlops-postgres-dev.database_endpoint_here:5432/mlops
+      - name: POSTGRES_USER
+        valueFrom:
+          secretKeyRef:
+            name: postgres-credentials
+            key: username
+      - name: POSTGRES_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: postgres-credentials
+            key: password
+      - name: REDIS_HOST
+        value: mlops-redis-cache-dev.redis_endpoint_here
+      - name: REDIS_PORT
+        value: "6379"
+      - name: REDIS_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: redis-credentials
+            key: password
+  executor:
+    cores: 1
+    instances: 2
+    memory: "2048m"
+    labels:
+      version: 3.4.1
+    env:
+      - name: KAFKA_BOOTSTRAP_SERVERS
+        value: kafka-bootstrap.kafka.svc.cluster.local:9092
+      - name: SCHEMA_REGISTRY_URL
+        value: http://schema-registry.kafka.svc.cluster.local:8081
+  monitoring:
+    exposeDriverMetrics: true
+    exposeExecutorMetrics: true
+    prometheus:
+      jmxExporterJar: "/prometheus/jmx_prometheus_javaagent-0.17.0.jar"
+      port: 8090
+  volumes:
+    - name: checkpoint-volume
+      hostPath:
+        path: /tmp/spark-checkpoints
+        type: DirectoryOrCreate 

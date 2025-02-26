@@ -1,0 +1,151 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-operator
+  namespace: spark
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-operator
+  template:
+    metadata:
+      labels:
+        app: spark-operator
+    spec:
+      serviceAccountName: spark-operator
+      containers:
+      - name: spark-operator
+        image: ghcr.io/googlecloudplatform/spark-operator:v1beta2-1.3.8-3.3.0
+        args:
+        - -v=2
+        - -namespace=spark
+        - -logtostderr
+        - -metrics-port=10254
+        - -metrics-prefix=spark-operator
+        - -webhook-port=8080
+        - -enable-webhook=true
+        - -webhook-timeout=30
+        - -enable-ui-service=true
+        - -controller-threads=10
+        resources:
+          limits:
+            cpu: 1
+            memory: 1Gi
+          requests:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark-operator
+  namespace: spark
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spark-operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - services
+  - configmaps
+  - secrets
+  verbs:
+  - create
+  - get
+  - delete
+  - update
+  - watch
+  - list
+  - patch
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - create
+  - get
+  - delete
+  - update
+  - watch
+  - list
+  - patch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - get
+  - delete
+  - update
+  - watch
+  - list
+  - patch
+- apiGroups:
+  - sparkoperator.k8s.io
+  resources:
+  - sparkapplications
+  - sparkapplications/status
+  - scheduledsparkapplications
+  - scheduledsparkapplications/status
+  verbs:
+  - create
+  - get
+  - delete
+  - update
+  - watch
+  - list
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spark-operator
+subjects:
+- kind: ServiceAccount
+  name: spark-operator
+  namespace: spark
+roleRef:
+  kind: ClusterRole
+  name: spark-operator
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark
+  namespace: spark
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark
+  namespace: spark
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark
+  namespace: spark
+subjects:
+- kind: ServiceAccount
+  name: spark
+  namespace: spark
+roleRef:
+  kind: Role
+  name: spark
+  apiGroup: rbac.authorization.k8s.io 
