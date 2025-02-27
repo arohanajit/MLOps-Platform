@@ -171,52 +171,25 @@ resource "aws_s3_bucket_policy" "mlops" {
 
 # IAM policy for bucket access
 resource "aws_iam_policy" "bucket_access" {
-  name        = "${var.bucket_prefix}-${var.environment}-access"
-  description = "Policy for accessing the MLOps S3 bucket"
-
+  name        = "mlops-s3-access-${var.environment}"
+  description = "Policy for accessing MLOps S3 bucket"
+  
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect = "Allow"
         Action = [
-          "s3:ListBucket"
-        ]
-        Resource = [aws_s3_bucket.mlops.arn]
-        Condition = {
-          StringLike = {
-            "s3:prefix": [
-              "models/*",
-              "mlflow/*",
-              "temp/*",
-              "logs/*"
-            ]
-          }
-        }
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
           "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket",
           "s3:DeleteObject"
         ]
         Resource = [
-          "${aws_s3_bucket.mlops.arn}/models/*",
-          "${aws_s3_bucket.mlops.arn}/mlflow/*",
-          "${aws_s3_bucket.mlops.arn}/temp/*",
-          "${aws_s3_bucket.mlops.arn}/logs/*"
+          aws_s3_bucket.mlops.arn,
+          "${aws_s3_bucket.mlops.arn}/*"
         ]
       }
     ]
   })
-}
-
-# Output the bucket name and policy ARN
-output "bucket_name" {
-  value = aws_s3_bucket.mlops.id
-}
-
-output "bucket_access_policy_arn" {
-  value = aws_iam_policy.bucket_access.arn
 } 

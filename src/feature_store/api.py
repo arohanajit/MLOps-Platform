@@ -6,13 +6,19 @@ users to retrieve feature values for model inference.
 """
 
 import logging
+import sys
+import os
 from typing import List, Dict, Any, Optional
 import time
+
+# Add the current directory to sys.path to find local modules
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException, Depends, Query
 from pydantic import BaseModel
 
-from feature_store import FeatureStore
+# Import from local module with proper path
+from src.feature_store.feature_store import FeatureStore
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

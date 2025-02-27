@@ -6,13 +6,19 @@ users to register, discover, and retrieve feature metadata.
 """
 
 import logging
+import sys
+import os
 from typing import List, Optional, Dict, Any
+
+# Add the current directory to sys.path to find local modules
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 
-from models import Feature, FeatureGroup, ValueType, FeatureSource, FeatureCategory, FeatureFrequency
-from storage import PostgresFeatureStore
+# Import from local modules with proper path
+from src.feature_registry.models import Feature, FeatureGroup, ValueType, FeatureSource, FeatureCategory, FeatureFrequency
+from src.feature_registry.storage import PostgresFeatureStore
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

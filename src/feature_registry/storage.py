@@ -15,7 +15,7 @@ import psycopg2
 from psycopg2.extras import Json as PgJson
 from psycopg2.extras import RealDictCursor
 
-from models import Feature, FeatureGroup, FeatureRegistry
+from src.feature_registry.models import Feature, FeatureGroup, FeatureRegistry
 
 logger = logging.getLogger(__name__)
 

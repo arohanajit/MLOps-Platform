@@ -2,9 +2,50 @@
 
 This guide provides instructions for setting up the MLOps platform infrastructure and core components.
 
-## Prerequisites
+## Local Development Setup
 
-Before you begin, ensure you have the following tools installed:
+For local development and testing, we've created a consolidated management script that makes it easy to work with the platform:
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/MLOps-Platform.git
+cd MLOps-Platform
+```
+
+2. Make the management script executable:
+```bash
+chmod +x mlops-platform.sh
+```
+
+3. Verify installation requirements:
+```bash
+./mlops-platform.sh verify
+```
+
+4. Start the platform:
+```bash
+./mlops-platform.sh start
+```
+
+5. Check service status:
+```bash
+./mlops-platform.sh status
+```
+
+Available commands:
+- `start` - Start the MLOps platform
+- `stop` - Stop the MLOps platform 
+- `restart` - Restart the MLOps platform
+- `status` - Check status of all services
+- `logs [service]` - Show logs for a specific service or all services
+- `test` - Run tests against the platform
+- `verify` - Verify platform installation
+- `clean` - Remove all containers and volumes
+- `help` - Show help message
+
+## Cloud Infrastructure Prerequisites
+
+Before you begin setting up the platform in a cloud environment, ensure you have the following tools installed:
 
 - AWS CLI (configured with appropriate credentials)
 - Terraform (v1.0 or higher)
@@ -116,100 +157,3 @@ kubectl apply -f kubernetes/kafka/strimzi-operator.yaml
 kubectl apply -f kubernetes/kafka/kafka-cluster.yaml
 kubectl apply -f kubernetes/kafka/schema-registry.yaml
 ```
-
-#### 5. Deploy Redis
-
-```bash
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm install redis bitnami/redis --namespace storage \
-  --set architecture=replication \
-  --set auth.enabled=true \
-  --set auth.password=<your-password>
-```
-
-#### 6. Deploy MLflow
-
-```bash
-helm repo add larribas https://larribas.me/helm-charts
-helm install mlflow larribas/mlflow --namespace mlflow \
-  --set backendStore.postgres.enabled=true \
-  --set backendStore.postgres.host=<db-endpoint> \
-  --set backendStore.postgres.port=5432 \
-  --set backendStore.postgres.database=mlops \
-  --set backendStore.postgres.user=postgres \
-  --set backendStore.postgres.password=<db-password> \
-  --set artifactRoot.s3.enabled=true \
-  --set artifactRoot.s3.bucket=<bucket-name> \
-  --set artifactRoot.s3.region=<aws-region>
-```
-
-#### 7. Deploy Spark Operator
-
-```bash
-helm repo add spark-operator https://googlecloudplatform.github.io/spark-on-k8s-operator
-helm install spark-operator spark-operator/spark-operator --namespace spark \
-  --set sparkJobNamespace=spark \
-  --set webhook.enable=true
-```
-
-#### 8. Deploy Airflow
-
-```bash
-helm repo add apache-airflow https://airflow.apache.org
-helm install airflow apache-airflow/airflow --namespace airflow \
-  --set executor=KubernetesExecutor \
-  --set postgresql.enabled=false \
-  --set externalDatabase.host=<db-endpoint> \
-  --set externalDatabase.port=5432 \
-  --set externalDatabase.database=mlops \
-  --set externalDatabase.user=postgres \
-  --set externalDatabase.password=<db-password>
-```
-
-## Accessing Components
-
-After deployment, you can access the various components using port-forwarding:
-
-### MLflow UI
-
-```bash
-kubectl port-forward -n mlflow svc/mlflow 5000:5000
-```
-
-Access MLflow at http://localhost:5000
-
-### Airflow UI
-
-```bash
-kubectl port-forward -n airflow svc/airflow-webserver 8080:8080
-```
-
-Access Airflow at http://localhost:8080
-
-### Kafka UI (if deployed)
-
-```bash
-kubectl port-forward -n kafka svc/kafka-ui 8080:8080
-```
-
-Access Kafka UI at http://localhost:8080
-
-## Destroying Infrastructure
-
-When you're done, you can destroy all AWS resources to avoid incurring charges:
-
-```bash
-cd terraform
-terraform destroy
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **EKS Cluster Creation Fails**: Check IAM permissions and VPC limits
-2. **Helm Chart Installation Fails**: Check Kubernetes connectivity and namespace existence
-3. **Database Connection Issues**: Verify security group configurations
-4. **Missing Prerequisites**: Run the setup script which will detect and offer to install missing tools
-
-For more help, see the project README or open an issue on the repository. 

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # MinIO (S3 alternative)
   minio:
@@ -23,7 +21,7 @@ services:
   postgres:
     image: postgres:14-alpine
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -88,24 +86,37 @@ services:
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
 
-  # MLflow for experiment tracking
+  # MLflow for experiment tracking with psycopg2 installed
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     ports:
-      - "5000:5000"
+      - "5001:5000"
     environment:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
-      MLFLOW_TRACKING_URI: http://localhost:5000
-    command: >
+      MLFLOW_TRACKING_URI: http://localhost:5001
+    entrypoint: >
+      bash -c "pip install psycopg2-binary boto3 && 
       mlflow server 
       --host 0.0.0.0 
       --backend-store-uri postgresql://postgres:postgres@postgres:5432/mlops
-      --default-artifact-root s3://mlflow/
+      --default-artifact-root s3://mlflow/"
     depends_on:
       - postgres
       - minio
+
+  # Create required bucket in MinIO
+  minio-setup:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (mc config host add minio http://minio:9000 minioadmin minioadmin) do echo 'Waiting for MinIO to be ready...' && sleep 1; done;
+      mc mb minio/mlflow --ignore-existing;
+      exit 0;
+      "
 
   # Feature registry API (development mode)
   feature-registry:
@@ -122,11 +133,12 @@ services:
       POSTGRES_PASSWORD: postgres
       LOG_LEVEL: DEBUG
       DEV_MODE: "true"
+      PYTHONPATH: /app
     volumes:
       - ./src:/app/src
     depends_on:
       - postgres
-    command: ["python", "src/feature_registry/api.py", "--dev"]
+    command: ["uvicorn", "src.feature_registry.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
   # Feature store API (development mode)
   feature-store:
@@ -146,13 +158,14 @@ services:
       FEATURE_REGISTRY_URL: http://feature-registry:8000
       LOG_LEVEL: DEBUG
       DEV_MODE: "true"
+      PYTHONPATH: /app
     volumes:
       - ./src:/app/src
     depends_on:
       - redis
       - postgres
       - feature-registry
-    command: ["python", "src/feature_store/api.py", "--dev"]
+    command: ["uvicorn", "src.feature_store.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 volumes:
   minio_data:

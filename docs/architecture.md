@@ -2,9 +2,9 @@
 
 ## Overview
 
-The MLOps platform is designed to support the entire machine learning lifecycle, from data ingestion to model deployment and monitoring. It consists of several interconnected components deployed on Kubernetes.
+The MLOps platform is designed to support the entire machine learning lifecycle, from data ingestion to model deployment and monitoring. It consists of several interconnected components deployed on Kubernetes in production and Docker Compose for local development.
 
-## Architecture Diagram
+## Architecture Diagram (Production)
 
 ```
                                     ┌─────────────────────────────────────────────────────────────┐
@@ -49,6 +49,75 @@ The MLOps platform is designed to support the entire machine learning lifecycle,
                                     │                                                             │
                                     └─────────────────────────────────────────────────────────────┘
 ```
+
+## Local Development Architecture
+
+For local development and testing, we use a streamlined Docker Compose setup that includes all core components. This allows developers to work with the platform without requiring a full Kubernetes deployment.
+
+### Local Components
+
+The local development environment includes:
+
+1. **Data Storage**
+   - PostgreSQL: For metadata and offline feature storage
+   - Redis: For online feature store
+   - MinIO: S3-compatible storage for artifacts
+
+2. **Messaging**
+   - Kafka: For data streaming
+   - Schema Registry: For data schema validation
+
+3. **ML Components**
+   - MLflow: For experiment tracking and model registry
+   - Feature Registry API: For feature metadata management
+   - Feature Store API: For feature storage and serving
+
+### Local Architecture Diagram
+
+```
+┌───────────────────────────────────────────────────────┐
+│                Docker Compose Environment              │
+│                                                       │
+│  ┌─────────────┐      ┌─────────────┐                 │
+│  │             │      │             │                 │
+│  │    Kafka    │─────▶│   Schema    │                 │
+│  │             │      │   Registry  │                 │
+│  └─────────────┘      └─────────────┘                 │
+│                                                       │
+│  ┌─────────────┐      ┌─────────────┐                 │
+│  │             │      │             │                 │
+│  │   MLflow    │◀────▶│    MinIO    │                 │
+│  │             │      │             │                 │
+│  └─────────────┘      └─────────────┘                 │
+│                                                       │
+│  ┌─────────────┐      ┌─────────────┐                 │
+│  │  Feature    │      │   Feature   │                 │
+│  │  Registry   │◀────▶│   Store     │                 │
+│  │             │      │             │                 │
+│  └─────────────┘      └─────────────┘                 │
+│         ▲                    ▲                        │
+│         │                    │                        │
+│         ▼                    ▼                        │
+│  ┌─────────────┐      ┌─────────────┐                 │
+│  │             │      │             │                 │
+│  │ PostgreSQL  │      │    Redis    │                 │
+│  │             │      │             │                 │
+│  └─────────────┘      └─────────────┘                 │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+```
+
+### Management Tools
+
+The local development environment is managed via a consolidated script (`mlops-platform.sh`) that provides commands for:
+
+- Starting and stopping the platform
+- Checking component status
+- Viewing logs
+- Running tests
+- Cleaning up resources
+
+For details on using this script, see the [Setup Guide](setup-guide.md#local-development-setup).
 
 ## Component Descriptions
 
