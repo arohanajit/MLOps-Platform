@@ -4,24 +4,39 @@ resource "random_string" "bucket_suffix" {
   upper   = false
 }
 
-resource "aws_s3_bucket" "artifact_bucket" {
-  bucket = "${var.bucket_prefix}-${var.environment}-${random_string.bucket_suffix.result}"
-  
-  tags = {
-    Name        = "${var.bucket_prefix}-${var.environment}"
-    Environment = var.environment
-  }
+resource "aws_s3_bucket" "mlops" {
+  bucket = "${var.bucket_prefix}-${var.environment}"
+
+  tags = merge(
+    {
+      Name        = "${var.bucket_prefix}-${var.environment}"
+      Environment = var.environment
+    },
+    var.tags
+  )
 }
 
-resource "aws_s3_bucket_versioning" "artifact_bucket_versioning" {
-  bucket = aws_s3_bucket.artifact_bucket.id
+# Block all public access
+resource "aws_s3_bucket_public_access_block" "mlops" {
+  bucket = aws_s3_bucket.mlops.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Enable versioning
+resource "aws_s3_bucket_versioning" "mlops" {
+  bucket = aws_s3_bucket.mlops.id
   versioning_configuration {
     status = "Enabled"
   }
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "artifact_bucket_encryption" {
-  bucket = aws_s3_bucket.artifact_bucket.id
+# Server-side encryption
+resource "aws_s3_bucket_server_side_encryption_configuration" "mlops" {
+  bucket = aws_s3_bucket.mlops.id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -30,49 +45,178 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "artifact_bucket_e
   }
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "artifact_lifecycle" {
-  bucket = aws_s3_bucket.artifact_bucket.id
+# Lifecycle rules
+resource "aws_s3_bucket_lifecycle_configuration" "mlops" {
+  bucket = aws_s3_bucket.mlops.id
 
+  # Rule for ML model artifacts
   rule {
-    id     = "cleanup-old-versions"
+    id     = "model_artifacts"
     status = "Enabled"
+    filter {
+      prefix = "models/"
+    }
 
+    # Move non-current versions to cheaper storage
+    noncurrent_version_transition {
+      noncurrent_days = 30
+      storage_class   = "STANDARD_IA"
+    }
+    # Delete old versions after 60 days (reduced from 90)
     noncurrent_version_expiration {
-      noncurrent_days = 90
+      noncurrent_days = 60
+    }
+    # Keep only last 2 versions (reduced from 3)
+    noncurrent_version_expiration {
+      newer_noncurrent_versions = 2
+    }
+    # Add size-based transition for large objects
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  # Rule for experiment tracking data
+  rule {
+    id     = "experiment_data"
+    status = "Enabled"
+    filter {
+      prefix = "mlflow/"
+    }
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+    expiration {
+      days = 180  # Reduced from 365
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  # Rule for temporary data
+  rule {
+    id     = "temp_data"
+    status = "Enabled"
+    filter {
+      prefix = "temp/"
+    }
+    
+    expiration {
+      days = 3  # Reduced from 7
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
+
+  # Rule for logs
+  rule {
+    id     = "logs"
+    status = "Enabled"
+    filter {
+      prefix = "logs/"
+    }
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+    expiration {
+      days = 60  # Reduced from 90
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "artifact_bucket_access" {
-  bucket = aws_s3_bucket.artifact_bucket.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+# Add bucket metrics for monitoring free tier usage
+resource "aws_s3_bucket_metric" "free_tier_monitoring" {
+  bucket = aws_s3_bucket.mlops.id
+  name   = "EntireBucket"
 }
 
-# IAM policy for access to the bucket
-resource "aws_iam_policy" "artifact_bucket_access" {
-  name        = "${var.bucket_prefix}-access-policy-${var.environment}"
-  description = "IAM policy for accessing the artifact bucket"
+# Bucket policy
+resource "aws_s3_bucket_policy" "mlops" {
+  bucket = aws_s3_bucket.mlops.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid       = "EnforceTLS"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.mlops.arn,
+          "${aws_s3_bucket.mlops.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# IAM policy for bucket access
+resource "aws_iam_policy" "bucket_access" {
+  name        = "${var.bucket_prefix}-${var.environment}-access"
+  description = "Policy for accessing the MLOps S3 bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
         Action = [
-          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [aws_s3_bucket.mlops.arn]
+        Condition = {
+          StringLike = {
+            "s3:prefix": [
+              "models/*",
+              "mlflow/*",
+              "temp/*",
+              "logs/*"
+            ]
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "s3:PutObject",
-          "s3:ListBucket",
+          "s3:GetObject",
           "s3:DeleteObject"
         ]
-        Effect   = "Allow"
         Resource = [
-          aws_s3_bucket.artifact_bucket.arn,
-          "${aws_s3_bucket.artifact_bucket.arn}/*"
+          "${aws_s3_bucket.mlops.arn}/models/*",
+          "${aws_s3_bucket.mlops.arn}/mlflow/*",
+          "${aws_s3_bucket.mlops.arn}/temp/*",
+          "${aws_s3_bucket.mlops.arn}/logs/*"
         ]
       }
     ]
   })
+}
+
+# Output the bucket name and policy ARN
+output "bucket_name" {
+  value = aws_s3_bucket.mlops.id
+}
+
+output "bucket_access_policy_arn" {
+  value = aws_iam_policy.bucket_access.arn
 } 

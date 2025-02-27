@@ -1,221 +1,167 @@
-# Feature Engineering System
+# Feature Engineering & Management Module
 
-This directory contains the components for the Feature Engineering system of the MLOps platform. The Feature Engineering system enables data scientists and ML engineers to define, compute, store, and serve features for machine learning models.
+This module implements the Feature Engineering & Management layer for the MLOps platform, optimized for AWS Free Tier usage.
 
 ## Components
 
-The Feature Engineering system consists of the following components:
-
-1. **Feature Registry**: Centralized metadata store for feature definitions
-2. **Feature Store**: Online and offline storage for feature values
-3. **Feature Pipeline**: Batch and streaming pipelines for computing features
-4. **Feature API**: REST API for retrieving feature values for model training and inference
+1. **Feature Registry**: Metadata registry for feature definitions stored in PostgreSQL
+2. **Feature Store**: Service for storing and retrieving feature values with online (Redis) and offline (PostgreSQL) stores
+3. **Batch Feature Engineering**: Spark-based feature computation pipelines
+4. **Feature Validation**: Quality validation framework with configurable validation rules
+5. **Feature Materialization**: Synchronization between online and offline stores
 
 ## Architecture
 
-![Feature Engineering Architecture](../../docs/images/feature-engineering-architecture.png)
+The feature engineering architecture consists of the following components:
 
-The Feature Engineering system uses a two-tier architecture:
-
-- **Online Store**: Redis is used for low-latency access to feature values during model inference
-- **Offline Store**: PostgreSQL is used for storing historical feature values for model training
-
-## Getting Started
-
-### Feature Registry API
-
-The Feature Registry API allows you to define and discover features:
-
-```bash
-# Create a new feature
-curl -X POST http://localhost/api/feature-registry/features \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "customer_total_purchases_30d",
-    "description": "Total purchase amount by customer in last 30 days",
-    "entity_type": "customer",
-    "value_type": "FLOAT",
-    "source": "BATCH",
-    "category": "DERIVED",
-    "frequency": "DAILY",
-    "owner": "data-science-team",
-    "tags": ["purchase", "monetary", "customer_360"],
-    "source_config": {
-      "table": "customer_purchases",
-      "filter": "purchase_date >= NOW() - INTERVAL '\''30 days'\''"
-    },
-    "transformations": [
-      {
-        "type": "aggregation",
-        "function": "sum",
-        "column": "purchase_amount"
-      }
-    ]
-  }'
-
-# Get feature details
-curl http://localhost/api/feature-registry/features/customer_total_purchases_30d
-
-# List all features
-curl http://localhost/api/feature-registry/features
-
-# Create a feature group
-curl -X POST http://localhost/api/feature-registry/feature-groups \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "customer_rfm_features",
-    "description": "RFM (Recency, Frequency, Monetary) features for customer segmentation",
-    "feature_names": [
-      "customer_days_since_last_purchase",
-      "customer_purchase_frequency_30d",
-      "customer_total_purchases_30d"
-    ],
-    "entity_type": "customer",
-    "owner": "data-science-team",
-    "tags": ["rfm", "segmentation", "customer_360"]
-  }'
+```
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+│                 │   │                 │   │                 │
+│  ML Training    │   │  ML Serving     │   │  Feature        │
+│  Pipeline       │   │  API            │   │  Engineering    │
+│                 │   │                 │   │  Pipelines      │
+└────────┬────────┘   └────────┬────────┘   └────────┬────────┘
+         │                     │                     │
+         │                     │                     │
+         ▼                     ▼                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│                      Feature Store API                      │
+│                                                             │
+└──────────────────┬───────────────────────┬─────────────────┘
+                   │                       │
+                   │                       │
+         ┌─────────▼────────┐    ┌─────────▼────────┐
+         │                  │    │                  │
+         │  Online Store    │    │  Offline Store   │
+         │  (Redis)         │    │  (PostgreSQL)    │
+         │                  │    │                  │
+         └──────────────────┘    └─────────┬────────┘
+                                           │
+                                           │
+                                 ┌─────────▼────────┐
+                                 │                  │
+                                 │ Feature Registry │
+                                 │ (PostgreSQL)     │
+                                 │                  │
+                                 └──────────────────┘
 ```
 
-### Feature Store API
+## Deployment
 
-The Feature Store API enables access to feature values:
+The components are deployed to Kubernetes using the scripts in the `kubernetes/feature-engineering` directory:
 
-```bash
-# Get feature values for an entity
-curl -X POST http://localhost/api/feature-store/features \
-  -H "Content-Type: application/json" \
-  -d '{
-    "entity_id": "customer123",
-    "feature_names": [
-      "customer_total_purchases_30d",
-      "customer_days_since_last_purchase",
-      "customer_purchase_frequency_30d"
-    ],
-    "entity_type": "customer"
-  }'
+1. **Feature Registry**: Defined in `feature-registry.yaml`
+2. **Feature Store**: Defined in `feature-store.yaml`
+3. **Batch Feature Engineering**: Defined in `batch-feature-engineering.yaml`
+4. **Feature Materialization**: Defined in `feature-materialization-job.yaml`
 
-# Get feature values for multiple entities
-curl -X POST http://localhost/api/feature-store/batch-features \
-  -H "Content-Type: application/json" \
-  -d '{
-    "entity_ids": ["customer123", "customer456", "customer789"],
-    "feature_names": [
-      "customer_total_purchases_30d",
-      "customer_days_since_last_purchase",
-      "customer_purchase_frequency_30d"
-    ],
-    "entity_type": "customer"
-  }'
-
-# Get historical feature values
-curl -X POST http://localhost/api/feature-store/historical-features \
-  -H "Content-Type: application/json" \
-  -d '{
-    "entity_id": "customer123",
-    "feature_names": [
-      "customer_total_purchases_30d",
-      "customer_days_since_last_purchase"
-    ],
-    "entity_type": "customer",
-    "start_time": "2023-01-01T00:00:00Z",
-    "end_time": "2023-04-01T00:00:00Z",
-    "limit": 100
-  }'
-```
-
-### Batch Feature Pipeline
-
-The Batch Feature Pipeline computes features on a schedule:
+To deploy all components, run:
 
 ```bash
-# Run manually with specific feature types
-python batch_pipeline.py --feature-types=customer,product --lookback-days=30
-
-# Kubernetes job
-kubectl apply -f ../../kubernetes/feature-engineering/batch-feature-engineering.yaml
+./deploy-feature-engineering.sh
 ```
 
-## Adding a New Feature
+## Local Development
 
-To add a new feature to the system:
+To set up a local development environment, use Docker Compose:
 
-1. Define the feature in the Feature Registry
-2. Add feature computation logic to the appropriate pipeline
-3. Test the feature by running the pipeline
-4. Update your model code to use the new feature
+```bash
+docker-compose -f docker-compose-feature-eng.yml up -d
+```
 
-Example:
+This will start PostgreSQL, Redis, Feature Registry API, and Feature Store API.
+
+## Usage Examples
+
+### Registering a Feature
 
 ```python
 import requests
 
-# Register the feature
-feature_data = {
-    "name": "customer_average_purchase_amount",
-    "description": "Average purchase amount by customer",
+feature = {
+    "name": "customer_purchase_count_30d",
+    "description": "Number of purchases in the last 30 days",
     "entity_type": "customer",
-    "value_type": "FLOAT",
-    "source": "BATCH",
-    "category": "DERIVED",
+    "value_type": "INTEGER",
+    "source": "DERIVED",
+    "category": "BEHAVIORAL",
     "frequency": "DAILY",
-    "owner": "data-science-team",
-    "tags": ["purchase", "monetary"],
-    "source_config": {
-        "table": "customer_purchases"
-    },
-    "transformations": [
-        {
-            "type": "aggregation",
-            "function": "avg",
-            "column": "purchase_amount"
-        }
-    ]
+    "owner": "data_science_team",
+    "tags": ["purchases", "engagement", "core"]
 }
 
 response = requests.post(
-    "http://localhost/api/feature-registry/features",
-    json=feature_data
+    "http://localhost:8000/features",
+    json=feature
 )
 print(response.json())
 ```
 
-## Kubernetes Deployment
+### Storing Feature Values
 
-The Feature Engineering system is deployed as Kubernetes services:
+```python
+import requests
 
-```bash
-# Deploy the Feature Registry
-kubectl apply -f ../../kubernetes/feature-engineering/feature-registry.yaml
+# Store a customer feature
+feature_values = {
+    "purchase_count_30d": 12,
+    "avg_order_value": 49.99,
+    "last_purchase_date": "2023-06-15T10:30:00Z"
+}
 
-# Deploy the Feature Store
-kubectl apply -f ../../kubernetes/feature-engineering/feature-store.yaml
-
-# Deploy the Batch Feature Pipeline
-kubectl apply -f ../../kubernetes/feature-engineering/batch-feature-engineering.yaml
+response = requests.post(
+    "http://localhost:8001/store/customer/12345",
+    json=feature_values
+)
+print(response.json())
 ```
 
-## Dependencies
+### Retrieving Feature Values
 
-- PostgreSQL: Used for offline feature storage and metadata
-- Redis: Used for online feature serving
-- Apache Spark: Used for feature computation
-- Kubernetes: Used for orchestration and scheduling
+```python
+import requests
 
-## Monitoring
+# Get a customer feature
+response = requests.get(
+    "http://localhost:8001/get/customer/12345/purchase_count_30d"
+)
+print(response.json())
 
-The Feature Engineering system exposes metrics through the Prometheus endpoints:
+# Get multiple features
+response = requests.get(
+    "http://localhost:8001/get/customer/12345",
+    params={"features": "purchase_count_30d,avg_order_value"}
+)
+print(response.json())
+```
 
-- `/metrics` endpoint on each service
-- Grafana dashboards for Feature Store and Registry monitoring
-- Airflow DAGs for monitoring feature computation jobs
+### Running Batch Feature Engineering
 
-## Troubleshooting
+```bash
+# Run Spark-based feature computation
+kubectl create -f kubernetes/feature-engineering/batch-feature-engineering-job.yaml
+```
 
-Common issues:
+## Feature Management Best Practices
 
-1. **Missing features**: Ensure the feature has been registered and computed
-2. **Slow feature retrieval**: Check Redis CPU and memory usage
-3. **Failed batch jobs**: Check Kubernetes pod logs for errors
-4. **Inconsistent feature values**: Verify the feature computation logic
+1. **Feature Versioning**: Each feature has a version history tracked in the Feature Registry
+2. **Feature Validation**: Use the validation framework to ensure data quality
+3. **Documentation**: Thoroughly document all features with descriptions and metadata
+4. **Feature Reuse**: Organize related features into feature groups for better reusability
+5. **Monitoring**: Set up alerts for feature drift and data quality issues
 
-For more information, see the [MLOps Platform Documentation](../../docs/README.md). 
+## AWS Free Tier Considerations
+
+This implementation is optimized for AWS Free Tier with the following considerations:
+
+1. **Resource Usage**: Spark jobs are configured with minimal resource requirements
+2. **Storage Optimization**: Features are stored efficiently with TTL for online storage
+3. **Scheduled Jobs**: Batch processing is scheduled to minimize compute costs
+
+## Limitations and Future Improvements
+
+1. **Scaling**: For production use beyond AWS Free Tier, consider using AWS Feature Store
+2. **Real-time Features**: Add support for real-time feature transformations
+3. **Feature Selection**: Implement automated feature selection based on importance
+4. **Model Integration**: Tighter integration with model training and serving 

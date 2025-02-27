@@ -8,7 +8,7 @@ metadata:
 spec:
   version: 3.5.0
   replicas: 1
-  bootstrapServers: kafka-bootstrap:9092
+  bootstrapServers: mlops-kafka-kafka-bootstrap:9092
   image: quay.io/debezium/connect:2.3
   config:
     group.id: kafka-connect-cluster
@@ -25,14 +25,14 @@ spec:
     # Add more connector-level configuration if needed
   resources:
     requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
       memory: 1Gi
       cpu: 500m
-    limits:
-      memory: 2Gi
-      cpu: 1000m
   jvmOptions:
-    -Xms: 1G
-    -Xmx: 1G
+    -Xms: 512M
+    -Xmx: 512M
   logging:
     type: inline
     loggers:

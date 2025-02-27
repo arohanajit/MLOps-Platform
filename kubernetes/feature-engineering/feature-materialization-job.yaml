@@ -1,0 +1,122 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: feature-materialization
+  namespace: mlops
+spec:
+  schedule: "*/30 * * * *"  # Run every 30 minutes
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: feature-materializer
+            image: python:3.9-slim
+            command:
+            - /bin/sh
+            - -c
+            - |
+              apt-get update && \
+              apt-get install -y git && \
+              pip install psycopg2-binary redis requests pandas && \
+              mkdir -p /app && \
+              cd /app && \
+              git clone https://github.com/username/mlops-platform.git || echo "Using existing repo" && \
+              cd mlops-platform && \
+              python src/feature_engineering/feature_materializer.py \
+                --direction both \
+                --entity-types customer,product,customer_product \
+                --since-hours 1 \
+                --batch-size 1000
+            env:
+            - name: POSTGRES_HOST
+              value: postgres.storage.svc.cluster.local
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: mlops
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: REDIS_HOST
+              value: redis.storage.svc.cluster.local
+            - name: REDIS_PORT
+              value: "6379"
+            - name: FEATURE_REGISTRY_URL
+              value: http://feature-registry.mlops.svc.cluster.local:8000
+            resources:
+              limits:
+                cpu: "500m"
+                memory: "512Mi"
+              requests:
+                cpu: "200m"
+                memory: "256Mi"
+          restartPolicy: OnFailure
+---
+# One-time job for initial materialization
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: feature-materialization-initial
+  namespace: mlops
+spec:
+  template:
+    spec:
+      containers:
+      - name: feature-materializer
+        image: python:3.9-slim
+        command:
+        - /bin/sh
+        - -c
+        - |
+          apt-get update && \
+          apt-get install -y git && \
+          pip install psycopg2-binary redis requests pandas && \
+          mkdir -p /app && \
+          cd /app && \
+          git clone https://github.com/username/mlops-platform.git || echo "Using existing repo" && \
+          cd mlops-platform && \
+          python src/feature_engineering/feature_materializer.py \
+            --direction both \
+            --entity-types customer,product,customer_product \
+            --since-hours 720 \
+            --batch-size 1000
+        env:
+        - name: POSTGRES_HOST
+          value: postgres.storage.svc.cluster.local
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: mlops
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: REDIS_HOST
+          value: redis.storage.svc.cluster.local
+        - name: REDIS_PORT
+          value: "6379"
+        - name: FEATURE_REGISTRY_URL
+          value: http://feature-registry.mlops.svc.cluster.local:8000
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+      restartPolicy: OnFailure 

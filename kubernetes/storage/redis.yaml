@@ -1,3 +1,67 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: storage
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: storage
+data:
+  redis.conf: |
+    # Memory configuration for resource-constrained environment
+    maxmemory 512mb
+    maxmemory-policy volatile-lru
+    
+    # Persistence settings
+    appendonly yes
+    appendfsync everysec
+    
+    # Save settings (reduced frequency for resource conservation)
+    save 900 1
+    save 300 10
+    
+    # Disable RDB snapshots to save resources
+    save ""
+    
+    # Security settings
+    protected-mode yes
+    
+    # Performance tuning
+    tcp-keepalive 300
+    
+    # Disable features not needed in a feature store context
+    lazyfree-lazy-eviction yes
+    lazyfree-lazy-expire yes
+    
+    # Logging
+    loglevel notice
+    
+    # Network settings
+    timeout 0
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-secret
+  namespace: storage
+type: Opaque
+stringData:
+  redis-password: mlops-redis-password
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -5,7 +69,7 @@ metadata:
   namespace: storage
 spec:
   serviceName: redis
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: redis
@@ -16,52 +80,56 @@ spec:
     spec:
       containers:
       - name: redis
-        image: redis:7.0-alpine
+        image: redis:6.2-alpine
         command:
           - redis-server
           - "/redis-config/redis.conf"
+          - "--requirepass"
+          - "$(REDIS_PASSWORD)"
         ports:
         - containerPort: 6379
+          name: redis
         resources:
-          limits:
-            cpu: 1
-            memory: 2Gi
           requests:
-            cpu: 500m
-            memory: 1Gi
+            cpu: "50m"
+            memory: "256Mi"
+          limits:
+            cpu: "200m"
+            memory: "512Mi"
         volumeMounts:
-        - name: redis-data
-          mountPath: /data
         - name: redis-config
           mountPath: /redis-config
-        livenessProbe:
-          exec:
-            command:
-            - sh
-            - -c
-            - redis-cli ping
-          initialDelaySeconds: 30
-          periodSeconds: 10
+        - name: redis-data
+          mountPath: /data
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: redis-password
         readinessProbe:
           exec:
             command:
             - sh
             - -c
-            - redis-cli ping
+            - redis-cli -a $REDIS_PASSWORD ping | grep PONG
           initialDelaySeconds: 5
           periodSeconds: 5
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli -a $REDIS_PASSWORD ping | grep PONG
+          initialDelaySeconds: 15
+          periodSeconds: 15
       volumes:
       - name: redis-config
         configMap:
           name: redis-config
-  volumeClaimTemplates:
-  - metadata:
-      name: redis-data
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      resources:
-        requests:
-          storage: 20Gi
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-data
 ---
 apiVersion: v1
 kind: Service
@@ -74,25 +142,4 @@ spec:
   ports:
   - port: 6379
     targetPort: 6379
-  clusterIP: None
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: redis-config
-  namespace: storage
-data:
-  redis.conf: |
-    appendonly yes
-    maxmemory 1536mb
-    maxmemory-policy allkeys-lru
-    requirepass ${REDIS_PASSWORD}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: redis-secrets
-  namespace: storage
-type: Opaque
-data:
-  password: cmVkaXNwYXNz  # redispass 
+    name: redis 

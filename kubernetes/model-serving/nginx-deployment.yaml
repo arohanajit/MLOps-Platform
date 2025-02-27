@@ -1,0 +1,259 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: model-serving
+  labels:
+    app: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21-alpine
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+        ports:
+        - containerPort: 80
+          name: http
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+        - name: nginx-html
+          mountPath: /usr/share/nginx/html
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 2
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+      - name: nginx-html
+        configMap:
+          name: nginx-html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: model-serving
+spec:
+  selector:
+    app: nginx
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: model-serving
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name localhost;
+
+        # Logging settings
+        access_log /var/log/nginx/access.log;
+        error_log /var/log/nginx/error.log;
+
+        # Health check endpoint
+        location /healthz {
+            return 200 'healthy\n';
+            add_header Content-Type text/plain;
+        }
+
+        # API Documentation
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+        }
+
+        # Default model - direct traffic to the main RayServe instance
+        location /api/v1/predictions {
+            proxy_pass http://rayserve:8000/predictions;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 60s;
+            proxy_buffering on;
+        }
+
+        # A/B testing - Model A (gets 80% of traffic)
+        location /api/v1/ab/predictions {
+            # A/B testing logic
+            set $ab_model_target "rayserve";
+            
+            # 80% to model A, 20% to model B
+            # We're using a simple random number split for this example
+            # In production, you'd want something more sophisticated
+            if ($request_id ~ ".*[0-1][0-9].*$") {
+                set $ab_model_target "rayserve-model-b";
+            }
+            
+            proxy_pass http://$ab_model_target:8000/predictions;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Model-Target $ab_model_target;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 60s;
+            proxy_buffering on;
+        }
+
+        # Direct model A access
+        location /api/v1/models/a/predictions {
+            proxy_pass http://rayserve:8000/predictions;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 60s;
+            proxy_buffering on;
+        }
+
+        # Direct model B access
+        location /api/v1/models/b/predictions {
+            proxy_pass http://rayserve-model-b:8000/predictions;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 60s;
+            proxy_buffering on;
+        }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-html
+  namespace: model-serving
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>MLOps Platform - Model Serving API</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                line-height: 1.6;
+            }
+            h1 {
+                color: #333;
+                border-bottom: 1px solid #eee;
+                padding-bottom: 10px;
+            }
+            h2 {
+                color: #444;
+                margin-top: 30px;
+            }
+            code {
+                background-color: #f4f4f4;
+                padding: 2px 5px;
+                border-radius: 3px;
+            }
+            pre {
+                background-color: #f4f4f4;
+                padding: 10px;
+                border-radius: 5px;
+                overflow-x: auto;
+            }
+            .endpoint {
+                margin-bottom: 20px;
+                border-left: 3px solid #2196F3;
+                padding-left: 15px;
+            }
+            .method {
+                font-weight: bold;
+                color: #2196F3;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>MLOps Platform - Model Serving API</h1>
+        <p>Welcome to the model serving API gateway. Below you'll find documentation on how to use our prediction endpoints.</p>
+        
+        <h2>Endpoints</h2>
+        
+        <div class="endpoint">
+            <span class="method">POST</span> <code>/api/v1/predictions</code>
+            <p>Default prediction endpoint, uses the current production model.</p>
+            <pre>{
+    "features": {
+        "feature1": value1,
+        "feature2": value2,
+        ...
+    }
+}</pre>
+        </div>
+        
+        <div class="endpoint">
+            <span class="method">POST</span> <code>/api/v1/ab/predictions</code>
+            <p>A/B testing endpoint - routes to either model A (80%) or model B (20%)</p>
+            <pre>Same format as default prediction endpoint</pre>
+        </div>
+        
+        <div class="endpoint">
+            <span class="method">POST</span> <code>/api/v1/models/a/predictions</code>
+            <p>Direct access to model A</p>
+            <pre>Same format as default prediction endpoint</pre>
+        </div>
+        
+        <div class="endpoint">
+            <span class="method">POST</span> <code>/api/v1/models/b/predictions</code>
+            <p>Direct access to model B</p>
+            <pre>Same format as default prediction endpoint</pre>
+        </div>
+        
+        <h2>Response Format</h2>
+        <pre>{
+    "prediction": [value1, value2, ...],
+    "model_info": {
+        "name": "model-name",
+        "version": "model-version",
+        "timestamp": "prediction-timestamp"
+    }
+}</pre>
+        
+        <h2>Health Check</h2>
+        <div class="endpoint">
+            <span class="method">GET</span> <code>/healthz</code>
+            <p>Health check endpoint for the API gateway</p>
+        </div>
+    </body>
+    </html> 

@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: monitoring
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      
+      # Enable metrics collection from Kubernetes
+      k8s_cluster:
+        collection_interval: 30s
+      
+      # Enable metrics collection from nodes
+      hostmetrics:
+        collection_interval: 30s
+        scrapers:
+          cpu:
+          memory:
+          disk:
+          filesystem:
+          network:
+
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+      
+      # Add sampling to reduce storage and costs
+      probabilistic_sampler:
+        hash_seed: 22
+        sampling_percentage: 20
+      
+      # Add resource information to traces and metrics
+      resource:
+        attributes:
+          - action: insert
+            key: service.name
+            value: "${SERVICE_NAME}"
+          - action: insert
+            key: deployment.environment
+            value: "${DEPLOYMENT_ENVIRONMENT}"
+
+    exporters:
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        namespace: mlops
+      
+      logging:
+        loglevel: info
+      
+      otlp:
+        endpoint: tempo.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch, probabilistic_sampler, resource]
+          exporters: [otlp, logging]
+        
+        metrics:
+          receivers: [otlp, k8s_cluster, hostmetrics]
+          processors: [batch, resource]
+          exporters: [prometheus, logging] 

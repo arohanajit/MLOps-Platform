@@ -12,8 +12,8 @@ spec:
     tasks.max: 1
     connector.class: io.debezium.connector.postgresql.PostgresConnector
     
-    # Connection information
-    database.hostname: mlops-postgres-dev.database_endpoint_here
+    # Connection information - set to use AWS RDS PostgreSQL
+    database.hostname: ${POSTGRES_HOST}
     database.port: 5432
     database.user: postgres
     database.password: ${file:/opt/kafka/external-configuration/connector-config/postgres-credentials.properties:password}
@@ -23,8 +23,8 @@ spec:
     # Slot name for replication
     slot.name: debezium_slot
     
-    # Tables to capture changes from
-    table.include.list: public.users,public.orders,public.products
+    # Only monitor essential tables to reduce resource consumption
+    table.include.list: public.users,public.models,public.experiments
     
     # PostgreSQL specific configurations
     plugin.name: pgoutput
@@ -36,7 +36,7 @@ spec:
     # Default behavior on schema changes
     tombstones.on.delete: true
     
-    # Configurations for the outbox pattern if implemented
+    # Basic transforms for simple use case
     transforms: unwrap
     transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState
     transforms.unwrap.drop.tombstones: false
@@ -47,9 +47,9 @@ spec:
     value.converter: org.apache.kafka.connect.json.JsonConverter
     value.converter.schemas.enable: true
     
-    # Various performance and resource tuning options
-    max.batch.size: 2048
-    max.queue.size: 8192
-    poll.interval.ms: 1000
-    heartbeat.interval.ms: 5000
+    # Reduced batch and queue sizes for lower resource usage
+    max.batch.size: 1024
+    max.queue.size: 4096
+    poll.interval.ms: 2000
+    heartbeat.interval.ms: 10000
     snapshot.mode: initial 

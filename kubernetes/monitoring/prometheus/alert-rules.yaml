@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+  namespace: monitoring
+data:
+  alerts.yml: |
+    groups:
+      - name: mlops_platform_alerts
+        rules:
+          # Alert on high error rates (>5% errors in 5 min)
+          - alert: HighErrorRate
+            expr: sum(rate(http_requests_total{status=~"5.*"}[5m])) by (job) / sum(rate(http_requests_total[5m])) by (job) > 0.05
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: High error rate for {{ $labels.job }}
+              description: "{{ $labels.job }} has a high error rate: {{ $value | humanizePercentage }}"
+          
+          # Alert for slow response times (P95 > 2s)
+          - alert: SlowResponseTime
+            expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (job, le)) > 2
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: Slow response time for {{ $labels.job }}
+              description: "{{ $labels.job }} has a slow P95 response time: {{ $value }}s"
+          
+          # Alert on model prediction drift
+          - alert: ModelDrift
+            expr: model_prediction_drift_score > 0.5
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: Model drift detected for {{ $labels.model_name }}
+              description: "{{ $labels.model_name }} is experiencing drift with score {{ $value }}"
+          
+          # Alert on resource constraints
+          - alert: HighCPUUsage
+            expr: sum(rate(container_cpu_usage_seconds_total{namespace=~"model-serving|feature-engineering|model-training"}[5m])) by (pod) / sum(kube_pod_container_resource_limits_cpu_cores{namespace=~"model-serving|feature-engineering|model-training"}) by (pod) > 0.85
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: High CPU usage for {{ $labels.pod }}
+              description: "{{ $labels.pod }} is using {{ $value | humanizePercentage }} of its CPU limit"
+          
+          # Alert on memory pressure
+          - alert: HighMemoryUsage
+            expr: sum(container_memory_usage_bytes{namespace=~"model-serving|feature-engineering|model-training"}) by (pod) / sum(kube_pod_container_resource_limits_memory_bytes{namespace=~"model-serving|feature-engineering|model-training"}) by (pod) > 0.85
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: High memory usage for {{ $labels.pod }}
+              description: "{{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit"
+              
+          # Alert on Kafka lag for data pipelines
+          - alert: KafkaConsumerLag
+            expr: kafka_consumergroup_lag > 1000
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: Kafka consumer lag for {{ $labels.consumergroup }}
+              description: "Consumer group {{ $labels.consumergroup }} for topic {{ $labels.topic }} is lagging by {{ $value }} messages" 

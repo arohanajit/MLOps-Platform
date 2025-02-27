@@ -6,7 +6,7 @@ metadata:
   labels:
     app: schema-registry
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: schema-registry
@@ -30,16 +30,16 @@ spec:
         - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC
           value: _schemas
         - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR
-          value: "3"
+          value: "1"
         - name: SCHEMA_REGISTRY_SCHEMA_REGISTRY_GROUP_ID
           value: schema-registry
         resources:
           limits:
-            cpu: 500m
-            memory: 1Gi
-          requests:
             cpu: 250m
             memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
         readinessProbe:
           httpGet:
             path: /

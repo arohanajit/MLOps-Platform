@@ -6,5 +6,10 @@ variable "repositories" {
 variable "environment" {
   description = "Environment (dev, staging, prod)"
   type        = string
-  default     = "dev"
+}
+
+variable "github_org" {
+  description = "GitHub organization name for container registry references"
+  type        = string
+  default     = "your-org"  # Replace with your GitHub org name
 } 

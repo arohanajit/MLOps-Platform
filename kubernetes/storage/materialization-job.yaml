@@ -19,17 +19,20 @@ spec:
       containers:
       - name: materialization
         image: ${ECR_REPO}/mlops/materialization-job:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         resources:
           requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
             memory: "256Mi"
             cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
         env:
         - name: POSTGRES_HOST
-          value: "mlops-postgres-dev.database_endpoint_here"
+          valueFrom:
+            configMapKeyRef:
+              name: storage-config
+              key: postgres_host
         - name: POSTGRES_PORT
           value: "5432"
         - name: POSTGRES_DB
@@ -45,20 +48,26 @@ spec:
               name: postgres-credentials
               key: password
         - name: REDIS_HOST
-          value: "mlops-redis-cache-dev.redis_endpoint_here"
+          value: "redis.storage.svc.cluster.local"
         - name: REDIS_PORT
           value: "6379"
         - name: REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: redis-credentials
-              key: password
+              name: redis-secret
+              key: redis-password
         - name: SYNC_INTERVAL_SECONDS
-          value: "60"
+          value: "300"
         - name: BATCH_SIZE
-          value: "1000"
+          value: "500"
         - name: TTL_SECONDS
-          value: "86400"
+          value: "43200"
+        - name: ENABLE_MODEL_FEATURES_SYNC
+          value: "true"
+        - name: ENABLE_USER_FEATURES_SYNC
+          value: "true"
+        - name: ENABLE_PREDICTIONS_SYNC
+          value: "true"
         livenessProbe:
           exec:
             command:
@@ -67,6 +76,7 @@ spec:
             - "python materialization.py"
           initialDelaySeconds: 30
           periodSeconds: 30
+          timeoutSeconds: 5
         readinessProbe:
           exec:
             command:
@@ -74,4 +84,62 @@ spec:
             - -f
             - "python materialization.py"
           initialDelaySeconds: 5
-          periodSeconds: 10 
+          periodSeconds: 10
+          timeoutSeconds: 3
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: storage-config
+  namespace: storage
+data:
+  postgres_host: "mlops-postgres-dev.cluster-id.region.rds.amazonaws.com"
+  s3_bucket: "mlops-artifacts-dev"
+  region: "us-east-1"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: data-retention-cleanup
+  namespace: storage
+spec:
+  schedule: "0 1 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cleanup
+            image: postgres:15.3
+            command:
+            - /bin/sh
+            - -c
+            - |
+              PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT cleanup_old_feature_values();"
+            env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: storage-config
+                  key: postgres_host
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: POSTGRES_DB
+              value: "mlops"
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "50m"
+              limits:
+                memory: "128Mi"
+                cpu: "100m"
+          restartPolicy: OnFailure

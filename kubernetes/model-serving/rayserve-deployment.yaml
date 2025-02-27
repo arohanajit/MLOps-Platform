@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rayserve
+  namespace: model-serving
+  labels:
+    app: rayserve
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rayserve
+  template:
+    metadata:
+      labels:
+        app: rayserve
+    spec:
+      containers:
+      - name: rayserve
+        image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/mlops-platform-rayserve:latest
+        imagePullPolicy: Always
+        env:
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: mlflow-config
+              key: MLFLOW_TRACKING_URI
+        - name: MODEL_NAME
+          value: "xgboost-model"  # Change as needed
+        - name: MODEL_VERSION
+          value: "1"             # Change as needed
+        - name: DEPLOYMENT_NAME
+          value: "default"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: PORT
+          value: "8000"
+        resources:
+          requests:
+            cpu: "500m"    # Minimum CPU (0.5 cores)
+            memory: "512Mi" # Minimum memory
+          limits:
+            cpu: "1"      # Maximum CPU (1 core)
+            memory: "1Gi" # Maximum memory
+        ports:
+        - containerPort: 8000
+          name: http
+        volumeMounts:
+        - name: model-serving-code
+          mountPath: /app/model_serving
+        - name: model-cache
+          mountPath: /tmp/model_cache
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: model-serving-code
+        configMap:
+          name: model-serving-code
+      - name: model-cache
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rayserve
+  namespace: model-serving
+spec:
+  selector:
+    app: rayserve
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http
+  type: ClusterIP 

@@ -1,12 +1,16 @@
 output "cluster_name" {
-  description = "EKS cluster name"
-  value       = module.eks.cluster_name
+  description = "k3s cluster name"
+  value       = module.k3s.cluster_name
 }
 
-output "cluster_endpoint" {
-  description = "Endpoint for EKS control plane"
-  value       = module.eks.cluster_endpoint
-  sensitive   = true
+output "kubeconfig_command" {
+  description = "Command to get the kubeconfig for k3s cluster"
+  value       = module.k3s.kubeconfig_command
+}
+
+output "master_public_ip" {
+  description = "Public IP of the k3s master node"
+  value       = module.k3s.master_public_ip
 }
 
 output "aws_region" {
@@ -29,10 +33,4 @@ output "postgres_password" {
 output "artifact_bucket_name" {
   description = "S3 bucket for artifact storage"
   value       = module.s3_storage.bucket_name
-}
-
-output "redis_endpoint" {
-  description = "Redis cluster endpoint"
-  value       = "${aws_elasticache_cluster.redis.cache_nodes.0.address}:${aws_elasticache_cluster.redis.cache_nodes.0.port}"
-  sensitive   = true
 } 

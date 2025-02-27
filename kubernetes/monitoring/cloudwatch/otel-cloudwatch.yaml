@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-cloudwatch-config
+  namespace: monitoring
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      
+      # Enable minimal metrics collection to stay within free tier
+      k8s_cluster:
+        collection_interval: 60s
+        node_conditions_to_report: ["Ready", "MemoryPressure", "DiskPressure"]
+        allocatable_types_to_report: ["cpu", "memory"]
+      
+      # Enable minimal host metrics
+      hostmetrics:
+        collection_interval: 60s
+        scrapers:
+          cpu:
+          memory:
+
+    processors:
+      batch:
+        timeout: 60s
+        send_batch_size: 8192
+      
+      # Add aggressive sampling to stay within free tier
+      probabilistic_sampler:
+        hash_seed: 22
+        sampling_percentage: 5
+      
+      # Filter metrics to stay within free tier (10 metrics)
+      filter:
+        metrics:
+          include:
+            match_type: strict
+            metric_names:
+              - container.cpu.usage
+              - container.memory.usage
+              - http.server.duration
+              - process.runtime.go.gc.pause_ns
+              - system.cpu.time
+              - system.memory.usage
+              - model_prediction_drift_score
+              - kafka_consumergroup_lag
+              - http_requests_total
+              - http_request_duration_seconds
+      
+      # Add resource info
+      resource:
+        attributes:
+          - action: insert
+            key: service.name
+            value: "${SERVICE_NAME}"
+          - action: insert
+            key: deployment.environment
+            value: "${DEPLOYMENT_ENVIRONMENT}"
+
+    exporters:
+      awsemf:
+        region: "${AWS_REGION}"
+        log_group_name: "/mlops-platform/metrics"
+        log_stream_name: "otel-metrics"
+        namespace: "MLOpsPlatform"
+        dimension_rollup_option: "NoDimensionRollup"
+        retention_resolution: 60s
+      
+      awsxray:
+        region: "${AWS_REGION}"
+        local_mode: true
+        no_verify_ssl: false
+      
+      logging:
+        loglevel: info
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch, probabilistic_sampler, resource]
+          exporters: [awsxray, logging]
+        
+        metrics:
+          receivers: [otlp, k8s_cluster, hostmetrics]
+          processors: [batch, filter, resource]
+          exporters: [awsemf, logging]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector-cloudwatch
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector-cloudwatch
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: otel-collector-cloudwatch
+    spec:
+      serviceAccountName: otel-collector
+      containers:
+        - name: otel-collector
+          image: amazon/aws-otel-collector:latest
+          args:
+            - "--config=/conf/otel-collector-config.yaml"
+          env:
+            - name: SERVICE_NAME
+              value: "otel-collector-cloudwatch"
+            - name: DEPLOYMENT_ENVIRONMENT
+              value: "production"
+            - name: AWS_REGION
+              value: "us-east-1"  # Change this to your AWS region
+            # AWS credentials should be provided via IAM roles for service accounts
+            # or via environment variables in a more secure way
+          ports:
+            - containerPort: 4317
+            - containerPort: 4318
+          resources:
+            limits:
+              cpu: 200m
+              memory: 400Mi
+            requests:
+              cpu: 100m
+              memory: 200Mi
+          volumeMounts:
+            - name: otel-collector-config
+              mountPath: /conf
+      volumes:
+        - name: otel-collector-config
+          configMap:
+            name: otel-collector-cloudwatch-config 

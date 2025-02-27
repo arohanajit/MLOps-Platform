@@ -1,0 +1,135 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      deploy_environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Set image tags
+      id: set-tags
+      run: |
+        if [[ $GITHUB_REF == refs/tags/v* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "IMAGE_TAGS=latest,${VERSION}" >> $GITHUB_ENV
+        else
+          SHA=$(git rev-parse --short HEAD)
+          echo "VERSION=sha-${SHA}" >> $GITHUB_ENV
+          echo "IMAGE_TAGS=sha-${SHA}" >> $GITHUB_ENV
+        fi
+    
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Build and push client
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./src/clients/Dockerfile
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository }}/client:${{ env.VERSION }}
+          ${{ contains(env.IMAGE_TAGS, 'latest') && format('ghcr.io/{0}/client:latest', github.repository) || '' }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: Build and push feature-engineering
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./src/feature_engineering/Dockerfile
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository }}/feature-engineering:${{ env.VERSION }}
+          ${{ contains(env.IMAGE_TAGS, 'latest') && format('ghcr.io/{0}/feature-engineering:latest', github.repository) || '' }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push model-serving
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./src/model_serving/Dockerfile
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository }}/model-serving:${{ env.VERSION }}
+          ${{ contains(env.IMAGE_TAGS, 'latest') && format('ghcr.io/{0}/model-serving:latest', github.repository) || '' }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.deploy_environment || 'development' }}
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Set up kubeconfig
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBECONFIG }}
+    
+    - name: Set image version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/v* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          SHA=$(git rev-parse --short HEAD)
+          VERSION=sha-${SHA}
+        fi
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+    
+    - name: Update deployment manifests
+      run: |
+        # Update image tags in deployment manifests
+        find kubernetes -type f -name "*.yaml" -exec sed -i "s|ghcr.io/${{ github.repository }}/client:.*|ghcr.io/${{ github.repository }}/client:${{ env.VERSION }}|g" {} \;
+        find kubernetes -type f -name "*.yaml" -exec sed -i "s|ghcr.io/${{ github.repository }}/feature-engineering:.*|ghcr.io/${{ github.repository }}/feature-engineering:${{ env.VERSION }}|g" {} \;
+        find kubernetes -type f -name "*.yaml" -exec sed -i "s|ghcr.io/${{ github.repository }}/model-serving:.*|ghcr.io/${{ github.repository }}/model-serving:${{ env.VERSION }}|g" {} \;
+    
+    - name: Deploy to Kubernetes
+      run: |
+        # Apply the updated manifests to the k3s cluster
+        kubectl apply -f kubernetes/storage
+        kubectl apply -f kubernetes/messaging
+        kubectl apply -f kubernetes/feature-engineering
+        kubectl apply -f kubernetes/model-serving
+        kubectl apply -f kubernetes/observability
+    
+    - name: Verify deployment
+      run: |
+        # Wait for deployments to be ready
+        kubectl rollout status deployment/feature-registry -n mlops
+        kubectl rollout status deployment/feature-store -n mlops
+        kubectl rollout status deployment/model-serving -n mlops 

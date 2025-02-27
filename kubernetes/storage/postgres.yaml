@@ -1,3 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: storage
+data:
+  init-schemas.sql: |
+    -- This will be executed on startup to initialize schemas
+    \connect mlopsdb
+    \i /docker-entrypoint-initdb.d/initialize_schemas.sql
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -34,26 +45,39 @@ spec:
           value: mlopsdb
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
+        # Optimized PostgreSQL configuration for resource constraints
+        - name: POSTGRES_INITDB_ARGS
+          value: "--data-checksums"
+        - name: POSTGRES_HOST_AUTH_METHOD
+          value: "md5"
         resources:
           limits:
-            cpu: 2
-            memory: 4Gi
+            cpu: 500m
+            memory: 1Gi
           requests:
-            cpu: 1
-            memory: 2Gi
+            cpu: 200m
+            memory: 512Mi
         volumeMounts:
         - name: postgres-data
           mountPath: /var/lib/postgresql/data
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
         livenessProbe:
           exec:
             command: ["pg_isready", "-U", "postgres"]
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 5
         readinessProbe:
           exec:
             command: ["pg_isready", "-U", "postgres"]
           initialDelaySeconds: 5
           periodSeconds: 5
+          timeoutSeconds: 2
+      volumes:
+      - name: init-scripts
+        configMap:
+          name: postgres-init
   volumeClaimTemplates:
   - metadata:
       name: postgres-data
@@ -61,7 +85,7 @@ spec:
       accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:
-          storage: 100Gi
+          storage: 20Gi
 ---
 apiVersion: v1
 kind: Service
@@ -84,4 +108,4 @@ metadata:
 type: Opaque
 data:
   username: cG9zdGdyZXM=  # postgres
-  password: cG9zdGdyZXNwYXNz  # postgrespass 
+  password: bWxvcHMtcG9zdGdyZXMtcGFzc3dvcmQ=  # mlops-postgres-password 
